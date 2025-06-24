@@ -1,0 +1,266 @@
+
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Particle Field Visualizer</title>
+  <style>
+    html, body {
+      margin: 0;
+      padding: 0;
+      overflow: hidden;
+      height: 100%;
+      background: black;
+      color: white;
+      font-family: sans-serif;
+      text-align: center;
+    }
+    canvas {
+      position: absolute;
+      top: 0;
+      left: 0;
+      display: block;
+      background: black;
+      z-index: 0;
+    }
+    button {
+      margin: 5px;
+      padding: 10px;
+      font-size: 16px;
+      position: relative;
+      z-index: 2;
+    }
+    #controls, #label, h2 {
+      position: relative;
+      z-index: 2;
+    }
+  </style>
+</head>
+<body>
+  <h2>Particle Field Visualizer</h2>
+  <div>
+    <button onclick="setScene(0)">Scene 0: Particle</button>
+    <button onclick="setScene(1)">Scene 1: Inverse Square</button>
+    <button onclick="setScene(2)">Scene 2: Glowing Particle Orbit</button>
+    <button onclick="setScene(3)">Scene 3: Hadron Trio</button>
+  </div>
+  <canvas id="canvas"></canvas>
+  <div id="label">Scene 0 Active</div>
+  <div id="controls">
+    <label for="zoom">Zoom: <span id="zoomValue">100</span></label>
+    <input type="range" id="zoom" min="50" max="500" step="1" value="100">
+  </div>
+  <script>
+    const canvas = document.getElementById("canvas");
+    const ctx = canvas.getContext("2d");
+    let width, height, centerX, centerY;
+    let scene = 0;
+    let zoomFactor = 100;
+    let particleAngle = 0;
+    let hadronAngle = 0;
+    const zoomLabel = document.getElementById("zoomValue");
+
+    function resizeCanvas() {
+      canvas.width = window.innerWidth;
+      canvas.height = window.innerHeight;
+      width = canvas.width;
+      height = canvas.height;
+      centerX = width / 2;
+      centerY = height / 2;
+    }
+
+    function drawArrow(x1, y1, x2, y2) {
+      const headlen = 10;
+      const angle = Math.atan2(y2 - y1, x2 - x1);
+      ctx.beginPath();
+      ctx.moveTo(x1, y1);
+      ctx.lineTo(x2, y2);
+      ctx.strokeStyle = "white";
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(x2, y2);
+      ctx.lineTo(x2 - headlen * Math.cos(angle - Math.PI / 6), y2 - headlen * Math.sin(angle - Math.PI / 6));
+      ctx.lineTo(x2 - headlen * Math.cos(angle + Math.PI / 6), y2 - headlen * Math.sin(angle + Math.PI / 6));
+      ctx.lineTo(x2, y2);
+      ctx.fillStyle = "white";
+      ctx.fill();
+    }
+
+    function drawGlowBuffer(buffer, cx, cy, r, g, b, radius) {
+      for (let y = 0; y < height; y++) {
+        for (let x = 0; x < width; x++) {
+          const dx = x - cx;
+          const dy = y - cy;
+          const dist = Math.sqrt(dx * dx + dy * dy);
+          const falloff = Math.max(0, 1 - dist / radius);
+          const alpha = falloff * falloff;
+          const i = (y * width + x) * 4;
+          buffer[i] += r * alpha;
+          buffer[i + 1] += g * alpha;
+          buffer[i + 2] += b * alpha;
+        }
+      }
+    }
+
+    function drawScene0() {
+      const scale = zoomFactor / 100;
+      const phase = performance.now() / 4000;
+      const amp = Math.sin(phase * 2 * Math.PI);
+      const r = amp > 0 ? 255 * amp : 0;
+      const g = amp < 0 ? -255 * amp : 0;
+      const radius = 100 * scale;
+      const buffer = new Float32Array(width * height * 4);
+      drawGlowBuffer(buffer, centerX, centerY, r, g, 0, radius);
+      renderBuffer(buffer);
+
+      drawArrow(centerX - 80, centerY, centerX, centerY);
+      ctx.fillStyle = "white";
+      ctx.fillText("Particle", centerX - 110, centerY + 20);
+      ctx.fillText("Fluctuates at f", centerX - 110, centerY + 40);
+      
+      // Dotted velocity arrow to the right labeled "V"
+      ctx.setLineDash([5, 5]);
+      drawArrow(centerX, centerY, centerX + 80, centerY);
+      ctx.setLineDash([]);
+      ctx.fillText("V", centerX + 85, centerY - 5);
+          
+      drawArrow(centerX, centerY, centerX + 70, centerY - 70);
+      ctx.fillText("Propagates at C", centerX + 75, centerY - 75);
+      const hx = centerX + 100, hy = centerY + 100;
+      drawArrow(hx, hy, hx, hy - 60);
+      drawArrow(hx, hy, hx + 45, hy + 45);
+      drawArrow(hx, hy, hx - 45, hy + 45);
+      ctx.fillText("Higgs field", hx + 50, hy - 10);
+    }
+
+    function drawScene1() {
+      const scale = zoomFactor / 100;
+      const offset = 50 * scale;
+      const phase = performance.now() / 4000;
+      const amp = Math.sin(phase * 2 * Math.PI);
+      const r1 = amp > 0 ? 255 * amp : 0;
+      const g1 = amp < 0 ? -255 * amp : 0;
+      const r2 = amp < 0 ? -255 * amp : 0;
+      const g2 = amp > 0 ? 255 * amp : 0;
+      const radius = 80 * scale;
+      const buffer = new Float32Array(width * height * 4);
+      drawGlowBuffer(buffer, centerX - offset, centerY, r1, g1, 0, radius);
+      drawGlowBuffer(buffer, centerX + offset, centerY, r2, g2, 0, radius);
+      renderBuffer(buffer);
+      
+      // Solid arrow showing destructive interference
+        drawArrow(centerX, centerY - 100, centerX, centerY);
+        ctx.fillStyle = "white";
+        ctx.fillText("Opposing field forces", centerX + 10, centerY - 70);
+        ctx.fillText("negate each other", centerX + 10, centerY - 50);
+        ctx.fillText("Unequal forces cause particles to move toward lesser force", centerX - 120, centerY + 100);
+        ctx.fillText("This causes particles to be pushed toward each other by the forces in the Higgs Field", centerX - 175, centerY+130);
+        ctx.fillText("This produces a hadron of two particles opposed in phase in a stable 2 body orbit", centerX - 175, centerY + 160);
+     }
+
+    function drawScene2() {
+      const scale = zoomFactor / 100;
+      const radius = 50 * scale;
+      const x1 = centerX + Math.cos(particleAngle) * radius;
+      const y1 = centerY + Math.sin(particleAngle) * radius;
+      const x2 = centerX + Math.cos(particleAngle + Math.PI) * radius;
+      const y2 = centerY + Math.sin(particleAngle + Math.PI) * radius;
+      const phase = performance.now() / 4000;
+      const amp = Math.sin(phase * 2 * Math.PI);
+      const r = amp > 0 ? 255 * amp : 0;
+      const g = amp < 0 ? -255 * amp : 0;
+      const buf = new Float32Array(width * height * 4);
+      drawGlowBuffer(buf, x1, y1, r, g, 0, 80 * scale);
+      drawGlowBuffer(buf, x2, y2, g, r, 0, 80 * scale);
+      renderBuffer(buf);
+      particleAngle += 0.5;
+    }
+
+     function drawScene3() {
+      const scale = zoomFactor / 100;
+      const rOuter = 100 * scale;   // Distance from center to each hadron
+      const rInner = 25 * scale;    // Radius of particle orbit within hadron
+      const time = performance.now() / 4000;  // Shared time base
+    
+      const buf = new Float32Array(width * height * 4);
+    
+      function drawGlowBuffer(buffer, cx, cy, value, radius) {
+        for (let y = 0; y < height; y++) {
+          for (let x = 0; x < width; x++) {
+            const dx = x - cx;
+            const dy = y - cy;
+            const dist = Math.sqrt(dx * dx + dy * dy);
+            const falloff = Math.max(0, 1 - dist / radius);
+            const alpha = falloff * falloff;
+            const i = (y * width + x) * 4;
+            buffer[i + 1] += value * alpha;  // Signed field in green channel
+          }
+        }
+      }
+    
+      for (let i = 0; i < 3; i++) {
+        const angleOffset = particleAngle + i * (2 * Math.PI / 3);  // Triangular spacing
+        const groupX = centerX + Math.cos(angleOffset) * rOuter;
+        const groupY = centerY + Math.sin(angleOffset) * rOuter;
+    
+        const phaseShift = i * (2 * Math.PI / 3);  // 0, 120°, 240°
+        const amp = Math.sin(time * 2 * Math.PI + phaseShift);  // Phase-offset sine
+    
+        const x1 = groupX + Math.cos(hadronAngle) * rInner;
+        const y1 = groupY + Math.sin(hadronAngle) * rInner;
+        const x2 = groupX + Math.cos(hadronAngle + Math.PI) * rInner;
+        const y2 = groupY + Math.sin(hadronAngle + Math.PI) * rInner;
+    
+        drawGlowBuffer(buf, x1, y1,  255 * amp, 80 * scale);  // Particle
+        drawGlowBuffer(buf, x2, y2, -255 * amp, 80 * scale);  // Anti-particle
+      }
+    
+      const img = ctx.createImageData(width, height);
+      for (let i = 0; i < buf.length; i += 4) {
+        const val = buf[i + 1];
+        img.data[i + 0] = val < 0 ? -val : 0;  // Red if negative
+        img.data[i + 1] = val > 0 ?  val : 0;  // Green if positive
+        img.data[i + 2] = 0;
+        img.data[i + 3] = 255;
+      }
+    
+      ctx.putImageData(img, 0, 0);
+      particleAngle += 0.5;
+      hadronAngle -= 1.0;
+    }
+    
+    function renderBuffer(buf) {
+      const img = ctx.createImageData(width, height);
+      for (let i = 0; i < buf.length; i += 4) {
+        img.data[i] = Math.min(255, buf[i]);
+        img.data[i + 1] = Math.min(255, buf[i + 1]);
+        img.data[i + 2] = Math.min(255, buf[i + 2]);
+        img.data[i + 3] = 255;
+      }
+      ctx.putImageData(img, 0, 0);
+    }
+
+    function draw() {
+      ctx.clearRect(0, 0, width, height);
+      if (scene === 0) drawScene0();
+      else if (scene === 1) drawScene1();
+      else if (scene === 2) drawScene2();
+      else if (scene === 3) drawScene3();
+      requestAnimationFrame(draw);
+    }
+
+    function setScene(n) {
+      scene = n;
+      document.getElementById("label").textContent = `Scene ${n} Active`;
+    }
+
+    document.getElementById("zoom").addEventListener("input", function(e) {
+      zoomFactor = parseFloat(e.target.value);
+      zoomLabel.textContent = zoomFactor;
+    });
+
+    window.addEventListener("resize", resizeCanvas);
+    resizeCanvas();
+    draw();
+  </script>
+</body>
+</html>
