@@ -1,1 +1,464 @@
-/data/data/com.termux/files/home/storage/downloads/Projects/ParticleVisualizer/particle_field_visualizer.html
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Particle Field Visualizer</title>
+  <style>
+    html, body {
+      margin: 0;
+      padding: 0;
+      overflow: hidden;
+      height: 100%;
+      background: black;
+      color: white;
+      font-family: sans-serif;
+      text-align: center;
+    }
+    canvas {
+      position: absolute;
+      top: 0;
+      left: 0;
+      display: block;
+      background: black;
+      z-index: 0;
+    }
+    button {
+      margin: 5px;
+      padding: 10px;
+      font-size: 16px;
+      position: relative;
+      z-index: 2;
+    }
+    #controls, #label, h2 {
+      position: relative;
+      z-index: 2;
+    }
+  </style>
+</head>
+<body>
+  <h2>Particle Field Visualizer</h2>
+  <div>
+    <button onclick="setScene(0)">Scene 0: Particle</button>
+    <button onclick="setScene(1)">Scene 1: Inverse Square</button>
+    <button onclick="setScene(2)">Scene 2: Glowing Particle Orbit</button>
+    <button onclick="setScene(3)">Scene 3: Hadron Trio</button>
+    <button onclick="setScene(4)">Scene 4: Force Vectors</button>
+    <button onclick="setScene(5)">Scene 5: Average Force Vectors</button>
+    <button onclick="setScene(6)">Scene 6: Field Gradient</button>
+  </div>
+  <canvas id="canvas"></canvas>
+  <div id="label">Scene 0 Active</div>
+  <div id="controls">
+    <label for="zoom">Zoom: <span id="zoomValue">100</span></label>
+    <input type="range" id="zoom" min="50" max="500" step="1" value="100"><br>
+    <button id="colorToggleBtn" onclick="toggleColor()" style="display: none; margin-top: 10px;">Color Theory</button>
+  </div>
+
+  <script>
+    const canvas = document.getElementById("canvas");
+    const ctx = canvas.getContext("2d");
+    let width, height, centerX, centerY;
+    let scene = 0;
+    let zoomFactor = 100;
+    let particleAngle = 0;
+    let hadronAngle = 0;
+    let colorPalette = 0;
+    const zoomLabel = document.getElementById("zoomValue");
+
+    function resizeCanvas() {
+      canvas.width = window.innerWidth;
+      canvas.height = window.innerHeight;
+      width = canvas.width;
+      height = canvas.height;
+      centerX = width / 2;
+      centerY = height / 2;
+    }
+    
+    function drawArrow(x1, y1, x2, y2) {
+      const headlen = 10;
+      const dx = x2 - x1;
+      const dy = y2 - y1;
+      const angle = Math.atan2(dy, dx);
+    
+      ctx.strokeStyle = "white";
+      ctx.fillStyle = "white";
+      ctx.lineWidth = 2;
+      ctx.setLineDash([]);
+    
+      // Main shaft
+      ctx.beginPath();
+      ctx.moveTo(x1, y1);
+      ctx.lineTo(x2, y2);
+      ctx.stroke();
+    
+      // Arrowhead
+      ctx.beginPath();
+      ctx.moveTo(x2, y2);
+      ctx.lineTo(x2 - headlen * Math.cos(angle - Math.PI / 6),
+                 y2 - headlen * Math.sin(angle - Math.PI / 6));
+      ctx.lineTo(x2 - headlen * Math.cos(angle + Math.PI / 6),
+                 y2 - headlen * Math.sin(angle + Math.PI / 6));
+      ctx.closePath();
+      ctx.fill();
+    }
+    
+    function drawGlowBuffer(buffer, cx, cy, r, g, b, radius) {
+      for (let y = 0; y < height; y++) {
+        for (let x = 0; x < width; x++) {
+          const dx = x - cx;
+          const dy = y - cy;
+          const dist = Math.sqrt(dx * dx + dy * dy);
+          const falloff = Math.max(0, 1 - dist / radius);
+          const alpha = falloff * falloff;
+          const i = (y * width + x) * 4;
+          buffer[i] += r * alpha;
+          buffer[i + 1] += g * alpha;
+          buffer[i + 2] += b * alpha;
+        }
+      }
+    }
+
+    function renderBuffer(buf) {
+      const img = ctx.createImageData(width, height);
+      for (let i = 0; i < buf.length; i += 4) {
+        img.data[i] = Math.min(255, buf[i]);
+        img.data[i + 1] = Math.min(255, buf[i + 1]);
+        img.data[i + 2] = Math.min(255, buf[i + 2]);
+        img.data[i + 3] = 255;
+      }
+      ctx.putImageData(img, 0, 0);
+    }
+
+    function drawScene0() {
+      const scale = zoomFactor / 100;
+      const phase = performance.now() / 4000;
+      const amp = Math.sin(phase * 2 * Math.PI);
+      const r = amp > 0 ? 255 * amp : 0;
+      const g = amp < 0 ? -255 * amp : 0;
+      const radius = 100 * scale;
+      const buffer = new Float32Array(width * height * 4);
+      drawGlowBuffer(buffer, centerX, centerY, r, g, 0, radius);
+      renderBuffer(buffer);
+      drawArrow(centerX - 80, centerY, centerX, centerY);
+      ctx.fillStyle = "white";
+      ctx.fillText("Particle", centerX - 110, centerY + 20);
+      ctx.fillText("Fluctuates at f", centerX - 110, centerY + 40);
+      ctx.setLineDash([5, 5]);
+      drawArrow(centerX, centerY, centerX + 80, centerY);
+      ctx.setLineDash([]);
+      ctx.fillText("V", centerX + 85, centerY - 5);
+      drawArrow(centerX, centerY, centerX + 70, centerY - 70);
+      ctx.fillText("Propagates at C", centerX + 75, centerY - 75);
+      const hx = centerX + 100, hy = centerY + 100;
+      drawArrow(hx, hy, hx, hy - 60);
+      drawArrow(hx, hy, hx + 45, hy + 45);
+      drawArrow(hx, hy, hx - 45, hy + 45);
+      ctx.fillText("Higgs field", hx + 50, hy - 10);
+      
+    }
+
+    function drawScene1() {
+      const scale = zoomFactor / 100;
+      const offset = 50 * scale;
+      const phase = performance.now() / 4000;
+      const amp = Math.sin(phase * 2 * Math.PI);
+      const r1 = amp > 0 ? 255 * amp : 0;
+      const g1 = amp < 0 ? -255 * amp : 0;
+      const r2 = amp < 0 ? -255 * amp : 0;
+      const g2 = amp > 0 ? 255 * amp : 0;
+      const radius = 80 * scale;
+      const buffer = new Float32Array(width * height * 4);
+      drawGlowBuffer(buffer, centerX - offset, centerY, r1, g1, 0, radius);
+      drawGlowBuffer(buffer, centerX + offset, centerY, r2, g2, 0, radius);
+      renderBuffer(buffer);
+      drawArrow(centerX, centerY - 100, centerX, centerY);
+      ctx.fillStyle = "white";
+      ctx.fillText("Opposing field forces", centerX + 10, centerY - 70);
+      ctx.fillText("negate each other", centerX + 10, centerY - 50);
+      ctx.fillText("Unequal forces cause particles to move toward lesser force", centerX - 120, centerY + 100);
+      ctx.fillText("This causes particles to be pushed toward each other by the forces in the Higgs Field", centerX - 175, centerY + 130);
+      ctx.fillText("This produces a hadron of two particles opposed in phase in a stable 2 body orbit", centerX - 175, centerY + 160);
+    }
+    
+    function drawScene2() {
+      const scale = zoomFactor / 100;
+      const radius = 50 * scale;
+      const x1 = centerX + Math.cos(particleAngle) * radius;
+      const y1 = centerY + Math.sin(particleAngle) * radius;
+      const x2 = centerX + Math.cos(particleAngle + Math.PI) * radius;
+      const y2 = centerY + Math.sin(particleAngle + Math.PI) * radius;
+      const phase = performance.now() / 4000;
+      const amp = Math.sin(phase * 2 * Math.PI);
+      const r = amp > 0 ? 255 * amp : 0;
+      const g = amp < 0 ? -255 * amp : 0;
+      const buf = new Float32Array(width * height * 4);
+      drawGlowBuffer(buf, x1, y1, r, g, 0, 80 * scale);
+      drawGlowBuffer(buf, x2, y2, g, r, 0, 80 * scale);
+      renderBuffer(buf);
+      particleAngle += 0.5;
+    }
+
+    function drawScene3() {
+      const scale = zoomFactor / 100;
+      const rOuter = 100 * scale;
+      const rInner = 25 * scale;
+      const time = performance.now() / 4000;
+      const buf = new Float32Array(width * height * 4);
+      for (let i = 0; i < 3; i++) {
+        const angleOffset = particleAngle + i * (2 * Math.PI / 3);
+        const groupX = centerX + Math.cos(angleOffset) * rOuter;
+        const groupY = centerY + Math.sin(angleOffset) * rOuter;
+        const phaseShift = i * (2 * Math.PI / 3);
+        const amp = Math.sin(time * 2 * Math.PI + phaseShift);
+        const theta = hadronAngle;
+        let x1, y1, x2, y2;
+        if (i === 0) {
+          x1 = groupX + Math.cos(theta) * rInner * scale;
+          y1 = groupY + Math.sin(theta) * rInner * scale;
+          x2 = groupX - Math.cos(theta) * rInner * scale;
+          y2 = groupY - Math.sin(theta) * rInner * scale;
+        } else if (i === 1) {
+          x1 = groupX;
+          y1 = groupY + Math.cos(theta) * rInner * scale;
+          x2 = groupX;
+          y2 = groupY - Math.cos(theta) * rInner * scale;
+        } else {
+          x1 = groupX + Math.cos(theta) * rInner * scale;
+          y1 = groupY;
+          x2 = groupX - Math.cos(theta) * rInner * scale;
+          y2 = groupY;
+        }
+        const value = 255 * amp;
+        drawGlowBuffer(buf, x1, y1, 0, value, 0, 80 * scale);
+        drawGlowBuffer(buf, x2, y2, 0, -value, 0, 80 * scale);
+      }
+      const img = ctx.createImageData(width, height);
+      for (let i = 0; i < buf.length; i += 4) {
+        const val = buf[i + 1];
+        img.data[i + 0] = val < 0 ? -val : 0;
+        img.data[i + 1] = val > 0 ? val : 0;
+        img.data[i + 2] = 0;
+        img.data[i + 3] = 255;
+      }
+      ctx.putImageData(img, 0, 0);
+      particleAngle += 0.05;
+      hadronAngle -= 0.1;
+    }
+
+    function drawScene4() {
+      const scale = zoomFactor / 100;
+      const offset = 25 * scale;
+      const radius = 80 * scale;
+      const time = performance.now() / 4000;
+      const bufY = new Float32Array(width * height * 4);
+      const bufX = new Float32Array(width * height * 4);
+      const ax = centerX - offset;
+      const ay = centerY;
+      const ampA = Math.sin(time * 2 * Math.PI);
+      drawGlowBuffer(bufY, ax, ay, 0, 255 * ampA, 0, radius);
+      const bx = centerX + offset;
+      const by = centerY;
+      const ampB = Math.sin((time + 0.25) * 2 * Math.PI);
+      drawGlowBuffer(bufX, bx, by, 0, 0, 255 * ampB, radius);
+      const step = 20;
+      ctx.strokeStyle = "cyan";
+      ctx.setLineDash([1]);
+      for (let y = 0; y < height; y += step) {
+        for (let x = 0; x < width; x += step) {
+          const idx = (y * width + x) * 4;
+          const g = bufY[idx + 1];
+          const r = bufY[idx];
+          const b = bufX[idx + 2];
+          const o = bufX[idx + 1];
+          const vy = ((g - r) / 255);
+          const vx = ((b - o) / 255);
+          const mag = Math.sqrt(vx * vx + vy * vy);
+          if (mag > 0.1) {
+            const scaleF = 25 / mag;
+            drawArrow(x, y, x + vx * scaleF, y + vy * scaleF);
+          }
+        }
+      }
+      ctx.fillStyle = "lime";
+      ctx.fillText("Vertical Field (Green/Red)", ax + 10, ay);
+      ctx.fillStyle = "orange";
+      ctx.fillText("Horizontal Field (Blue/Orange)", bx + 10, by);
+    }
+
+    function drawScene5() {
+      const scale = zoomFactor / 100;
+      const offset = 100 * scale;
+      const radius = 80 * scale;
+      const time = performance.now() / 1000;
+      if (!window.vectorHistory) window.vectorHistory = [];
+      const history = window.vectorHistory;
+      const bufY = new Float32Array(width * height * 4);
+      const bufX = new Float32Array(width * height * 4);
+      const ax = centerX - offset;
+      const ay = centerY;
+      const ampA = Math.sin(time * 2 * Math.PI);
+      drawGlowBuffer(bufY, ax, ay, 0, 255 * ampA, 0, radius);
+      const bx = centerX + offset;
+      const by = centerY;
+      const ampB = Math.sin((time + 0.25) * 2 * Math.PI);
+      drawGlowBuffer(bufX, bx, by, 0, 0, 255 * ampB, radius);
+      const step = 20;
+      const currentFrame = [];
+      for (let y = 0; y < height; y += step) {
+        for (let x = 0; x < width; x += step) {
+          const idx = (y * width + x) * 4;
+          const g = bufY[idx + 1];
+          const r = bufY[idx];
+          const b = bufX[idx + 2];
+          const o = bufX[idx + 1];
+          const vy = ((g - r) / 255);
+          const vx = ((b - o) / 255);
+          currentFrame.push({ x, y, vx, vy });
+        }
+      }
+      history.push({ time, frame: currentFrame });
+      const cutoff = time - 2.0;
+      while (history.length > 0 && history[0].time < cutoff) history.shift();
+      ctx.strokeStyle = "cyan";
+      ctx.setLineDash([1]);
+      for (let i = 0; i < currentFrame.length; i++) {
+        const { x, y } = currentFrame[i];
+        let sumVX = 0, sumVY = 0, count = 0;
+        for (const past of history) {
+          const p = past.frame[i];
+          sumVX += p.vx;
+          sumVY += p.vy;
+          count++;
+        }
+        if (count > 0) {
+          const avgVX = sumVX / count;
+          const avgVY = sumVY / count;
+          const mag = Math.sqrt(avgVX * avgVX + avgVY * avgVY);
+          if (mag > 0.1) {
+            const scaleF = 25 / mag;
+            drawArrow(x, y, x + avgVX * scaleF, y + avgVY * scaleF);
+          }
+        }
+      }
+      ctx.fillStyle = "lime";
+      ctx.fillText("Vertical Field (Green/Red)", ax + 10, ay);
+      ctx.fillStyle = "orange";
+      ctx.fillText("Horizontal Field (Blue/Orange)", bx + 10, by);
+    }
+    
+    function drawScene6() {
+      const scale = zoomFactor / 100;
+      const offset = 60 * scale;
+      const radius = 100 * scale;
+      const time = performance.now() / 4000;
+      const t = time * 2 * Math.PI;
+    
+      const buffer = new Float32Array(width * height * 4);
+      const px1 = centerX - offset;
+      const px2 = centerX + offset;
+      const py = centerY;
+    
+      // Animated red and green values (out of phase)
+      const redVal = 255 * (Math.sin(t) + 1) / 2;
+      const greenVal = 255 * (Math.cos(t) + 1) / 2;
+    
+      drawGlowBuffer(buffer, px1, py, redVal, 0, 0, radius);   // Red field
+      drawGlowBuffer(buffer, px2, py, 0, greenVal, 0, radius); // Green field
+    
+      renderBuffer(buffer);
+    
+      const step = 20;
+      for (let y = 0; y < height - step; y += step) {
+        for (let x = 0; x < width - step; x += step) {
+          const i1 = (y * width + x) * 4;
+          const i2 = ((y + step) * width + x) * 4;
+          const i3 = (y * width + (x + step)) * 4;
+    
+          // Determine which particle is closer
+          const d1 = Math.hypot(x - px1, y - py); // to red
+          const d2 = Math.hypot(x - px2, y - py); // to green
+    
+          let e1, e2, e3;
+    
+          if (d1 < d2) {
+            // Closer to red particle: compute R - G
+            e1 = buffer[i1]     - buffer[i1 + 1];
+            e2 = buffer[i2]     - buffer[i2 + 1];
+            e3 = buffer[i3]     - buffer[i3 + 1];
+          } else {
+            // Closer to green particle: compute G - R
+            e1 = buffer[i1 + 1] - buffer[i1];
+            e2 = buffer[i2 + 1] - buffer[i2];
+            e3 = buffer[i3 + 1] - buffer[i3];
+          }
+    
+          const gx = e3 - e1;
+          const gy = e2 - e1;
+          const mag = Math.sqrt(gx * gx + gy * gy);
+    
+          if (mag !== 0) {
+            const scaleF = 50 / mag;
+            ctx.strokeStyle = "white";
+            ctx.lineWidth = 2;
+            drawArrow(x, y, x + gx * scaleF, y + gy * scaleF); // show correct reaction force
+          }
+    
+          // Optional debug near center
+          const cx = Math.floor(centerX);
+          const cy = Math.floor(centerY);
+          if (Math.abs(x - cx) < step && Math.abs(y - cy) < step) {
+            showDebug(x, y, gx, gy, mag);
+          }
+        }
+      }
+    
+      ctx.fillStyle = "white";
+      ctx.fillText("Scene 6: Gradient Field Arrows", centerX - 100, 40);
+    }
+
+
+    function showDebug(x, y, gx, gy, mag) {
+      let logDiv = document.getElementById("log");
+      if (!logDiv) {
+        logDiv = document.createElement("div");
+        logDiv.id = "log";
+        logDiv.style.cssText = "position:absolute;bottom:0;left:0;color:lime;font:14px monospace;";
+        document.body.appendChild(logDiv);
+      }
+      logDiv.innerText = `x: ${x}, y: ${y}, gx: ${gx.toFixed(2)}, gy: ${gy.toFixed(2)}, mag: ${mag.toFixed(2)}`;
+    }
+
+    function draw() {
+      ctx.clearRect(0, 0, width, height);
+      if (scene === 0) drawScene0();
+      else if (scene === 1) drawScene1();
+      else if (scene === 2) drawScene2();
+      else if (scene === 3) drawScene3();
+      else if (scene === 4) drawScene4();
+      else if (scene === 5) drawScene5();
+      else if (scene === 6) drawScene6();
+      requestAnimationFrame(draw);
+    }
+
+    function setScene(n) {
+      scene = n;
+      document.getElementById("label").textContent = `Scene ${n} Active`;
+      document.getElementById("colorToggleBtn").style.display = (scene === 3) ? "inline-block" : "none";
+    }
+
+    function toggleColor() {
+      colorPalette = (colorPalette + 1) % 3;
+    }
+
+    document.getElementById("zoom").addEventListener("input", function(e) {
+      zoomFactor = parseFloat(e.target.value);
+      zoomLabel.textContent = zoomFactor;
+    });
+
+    window.addEventListener("resize", resizeCanvas);
+    resizeCanvas();
+    draw();
+    // Done
+  </script>
+</body>
+</html>
+    
