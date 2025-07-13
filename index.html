@@ -1,6 +1,8 @@
 <!DOCTYPE html>
 <html>
 <head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Particle Field Visualizer</title>
   <style>
     html, body {
@@ -12,8 +14,12 @@
       color: white;
       font-family: sans-serif;
       text-align: center;
+    
+      /* responsive base font: 10 px on very small screens,
+         up to ~26 px on 4 K monitors                        */
+      font-size: calc(10px + 1vw);
     }
-
+    
     canvas {
       position: absolute;
       top: 0;
@@ -22,51 +28,38 @@
       background: black;
       z-index: 0;
     }
-
-    button {
-      margin: 5px;
-      padding: 10px;
-      font-size: 16px;
-      position: relative;
-      z-index: 2;
-    }
-
-    #controls, #label, h2 {
+    
+    button,
+    label,
+    input {
+      font-size: 1em;          /* follow body size        */
+      padding: 0.5em 1em;      /* scale with font         */
+      margin: 4px;             /* consistent spacing      */
       position: relative;
       z-index: 2;
     }
     
-    #left-controls {
-      position: absolute;
-      bottom: 20px;
-      left: 10px;
-      display: flex;
-      flex-direction: column;
-      z-index: 2;
-    }
-    
-    #left-controls button {
-      margin: 4px 0;
-    }
-
     #ui-wrapper {
       display: flex;
       flex-direction: column;
       align-items: center;
-      text-align: center;
       position: relative;
       z-index: 2;
     }
-
-    #ui-wrapper > div,
-    #ui-wrapper > h2 {
-      margin-bottom: 10px;
-    }
-
+    
     #controls {
       display: flex;
       flex-direction: column;
       align-items: center;
+    }
+    
+    #left-controls {
+      position: absolute;
+      bottom: 1em;
+      left: 0.5em;
+      display: flex;
+      flex-direction: column;
+      z-index: 2;
     }
     
     #zoom {
@@ -76,7 +69,7 @@
 </head>
 <body>
     <div id="ui-wrapper">
-      <h2>Particle Field Visualizer</h2>
+      <h2>Particle Field Visualizer v0.1b</h2>
     
       <div id="label">Scene 0 Active</div>
     
@@ -119,11 +112,14 @@
     const DIR_POS_Z = 4;  // +Z → forward → yellow
     const DIR_NEG_Z = 5;  // -Z → back    → purplej
     
-    let zRenderMode = "slice";     // "slice" or "surface"
-        
+    const TIME_SCALE   = 0.5;               // full wave every 2 seconds
+    const PHASE_OFFSET = 0.5 / TIME_SCALE;  // = 1.0 → 180° shift        
+            
     // 3D buffer dimensions for the gluon field
     let size3DX = 0, size3DY = 0, size3DZ = 0;
     let buffer3DDir = null;
+    
+    let higgsParticles = [];
 
     let colorMode = "subtractive";
     function toggleColorMode() {
@@ -152,7 +148,6 @@
     } 
                
     function calculate3DSizes() {
-//      const V = 262144;    // 64x64x64
       const V = 262144;    // 64x64x64
       const W = canvas.width;
       const H = canvas.height;
@@ -184,35 +179,34 @@
     }
                  
     function emitOscillatingParticle(buffer, cx, cy, cz, t, radius) {
-      const osc = Math.sin(t * 2 * Math.PI);
+      const osc       = Math.sin(t * TIME_SCALE * 2 * Math.PI);
       const radiusInt = Math.floor(radius);
+      const dir       = (osc >= 0) ? DIR_POS_Y : DIR_NEG_Y;   // ← declare ONCE here
     
       for (let z = -radiusInt; z <= radiusInt; z++) {
         for (let y = -radiusInt; y <= radiusInt; y++) {
           for (let x = -radiusInt; x <= radiusInt; x++) {
-            const dist = Math.sqrt(x * x + y * y + z * z);
+            const dist = Math.sqrt(x*x + y*y + z*z);
             if (dist > radius) continue;
     
             const falloff = 1 - dist / radius;
-            const alpha = falloff * falloff;
-            const value = 255 * alpha * osc;
+            const alpha   = falloff * falloff;
+            const value   = 255 * alpha * osc;
     
             const ix = cx + x;
             const iy = cy + y;
             const iz = cz + z;
     
-            if (
-              ix < 0 || ix >= size3DX ||
-              iy < 0 || iy >= size3DY ||
-              iz < 0 || iz >= size3DZ
-            ) continue; 
-               
-            const dir = osc >= 0 ? DIR_POS_Y : DIR_NEG_Y;
+            if (ix<0||ix>=size3DX||iy<0||iy>=size3DY||iz<0||iz>=size3DZ) continue;
+    
             const idx = getFieldIndex(ix, iy, iz, dir);
             buffer[idx] += Math.abs(value);
           }
         }
       }
+    
+      // register ONE logical particle
+      higgsParticles.push({ x: cx, y: cy, z: cz, dir });
     }
 
     /* ====================================================================
@@ -397,8 +391,12 @@
       draw();
     }
     
-    function drawArrow(x1, y1, x2, y2) {
-      const headlen = 10;
+    function drawArrow(x1, y1, x2, y2, vz = 0) {
+      // Arrowhead scaling based on Z
+      const BASE_HEADLEN = 10;
+      const zScale = 1 + 0.5 * (vz / (Math.abs(vz) + 1));
+      const headlen = BASE_HEADLEN * zScale;
+    
       const dx = x2 - x1;
       const dy = y2 - y1;
       const angle = Math.atan2(dy, dx);
@@ -408,7 +406,7 @@
       ctx.lineWidth = 2;
       ctx.setLineDash([]);
     
-      // Main shaft
+      // Shaft
       ctx.beginPath();
       ctx.moveTo(x1, y1);
       ctx.lineTo(x2, y2);
@@ -417,194 +415,313 @@
       // Arrowhead
       ctx.beginPath();
       ctx.moveTo(x2, y2);
-      ctx.lineTo(x2 - headlen * Math.cos(angle - Math.PI / 6),
-                 y2 - headlen * Math.sin(angle - Math.PI / 6));
-      ctx.lineTo(x2 - headlen * Math.cos(angle + Math.PI / 6),
-                 y2 - headlen * Math.sin(angle + Math.PI / 6));
+      ctx.lineTo(
+        x2 - headlen * Math.cos(angle - Math.PI / 6),
+        y2 - headlen * Math.sin(angle - Math.PI / 6)
+      );
+      ctx.lineTo(
+        x2 - headlen * Math.cos(angle + Math.PI / 6),
+        y2 - headlen * Math.sin(angle + Math.PI / 6)
+      );
       ctx.closePath();
       ctx.fill();
     }
-
+    
+    function drawForceArrow(ctx, x, y, fx, fy) {
+      const strength = Math.hypot(fx, fy);
+    
+      // === CONFIG ===
+      const minWidth = 1;
+      const maxWidth = 10;;
+      const lengthScale = 40;   // makes arrows much longer
+      const arrowHeadSize = 6;  // size of the arrowhead
+      const gain = 1;         // line width gain
+    
+      // === Direction and scaled length ===
+      const angle = Math.atan2(fy, fx);
+      const dx = Math.cos(angle) * lengthScale;
+      const dy = Math.sin(angle) * lengthScale;
+    
+      const ex = x + dx;
+      const ey = y + dy;
+      const lineWidth = Math.max(minWidth, Math.min(maxWidth, strength * gain));
+    
+      ctx.save();
+      ctx.lineWidth = lineWidth;
+      ctx.strokeStyle = "white";
+      ctx.fillStyle = "white";
+      ctx.lineCap = "round";
+    
+      // Draw main line
+      ctx.beginPath();
+      ctx.moveTo(x, y);
+      ctx.lineTo(ex, ey);
+      ctx.stroke();
+    
+      // Draw arrowhead
+      ctx.beginPath();
+      ctx.moveTo(ex, ey);
+      ctx.lineTo(ex - Math.cos(angle - 0.4) * arrowHeadSize, ey - Math.sin(angle - 0.4) * arrowHeadSize);
+      ctx.lineTo(ex - Math.cos(angle + 0.4) * arrowHeadSize, ey - Math.sin(angle + 0.4) * arrowHeadSize);
+      ctx.closePath();
+      ctx.fill();
+    
+      ctx.restore();
+    }
+    
+     /* ────────────────────────────────────────────────────────────────
+       Convert voxel coordinates (voxelX, voxelY, voxelZ) to
+       screen-space pixel coordinates { x, y }.
+    
+       – Automatically recalculates scaleX / scaleY from the
+         current canvas size and 3-D field dimensions.
+       – Needs only the voxel coordinates you pass in.
+       – Assumes the voxel grid is centred on the canvas.
+       ---------------------------------------------------------------- */
+    function voxelToScreen(voxelX, voxelY, voxelZ = 0) {
+      // 1. defensive guards (prevents NaN explosions)
+      if (!Number.isFinite(canvas.width)  || !Number.isFinite(canvas.height) ||
+          !Number.isFinite(size3DX)       || !Number.isFinite(size3DY))
+      {
+        return { x: 0, y: 0 };
+      }
+    
+      // 2. current pixel size of one voxel
+      const scaleX = canvas.width  / size3DX;
+      const scaleY = canvas.height / size3DY;
+    
+      // 3. where is the voxel grid’s centre?
+      const gridCenterX = size3DX * 0.5;
+      const gridCenterY = size3DY * 0.5;
+    
+      // 4. map voxel-space → screen-space
+      const screenX = centerX + (voxelX - gridCenterX) * scaleX;
+      const screenY = centerY + (voxelY - gridCenterY) * scaleY;
+    
+      return { x: screenX, y: screenY };
+    }
+    
     function sceneMain() {
       try {
         bufferInit();
+        higgsParticles.length = 0;
     
-        const timePhase = performance.now() / 4000;
-        const zoomScale = zoomFactor / 100;
+        const nowSec        = performance.now() * 0.001;
+        const zoomScale     = zoomFactor / 100;
+        const gluonCenterX  = Math.floor(size3DX / 2);
+        const gluonCenterY  = Math.floor(size3DY / 2);
+        const gluonCenterZ  = Math.floor(size3DZ / 2);
+        const fieldRadius   = 10 * zoomScale;
+        const orbitRadius   = Math.round(5  * zoomScale);
+        const triRadius     = Math.round(40 * zoomScale);
+        const ZOOM_PARTICLE = 175;
+        const ZOOM_HADRON   = 70;
     
-        const gluonCenterX = Math.floor(size3DX / 2);
-        const gluonCenterY = Math.floor(size3DY / 2);
-        const gluonCenterZ = Math.floor(size3DZ / 2);
-
         let pairCenterX = 0;
-             
-        const fieldRadius = 10 * zoomScale;
-        const orbitRadius = Math.round(5  * zoomScale);
-        const triangleRadius = Math.round(40 * zoomScale);
     
-        const ZOOM_PARTICLE  = 175;
-        const ZOOM_HADRON = 70;
-        
-        /* ------------------------------------------------------------------ */
-        /* 1. SINGLE-PARTICLE VIEW                                            */
-        /* ------------------------------------------------------------------ */
         if (zoomFactor > ZOOM_PARTICLE) {
-          // Emit 3D directional oscillation for full simulation
-          emitOscillatingParticle( buffer3DDir, gluonCenterX, gluonCenterY, gluonCenterZ, timePhase, fieldRadius);
-                  
-        /* ------------------------------------------------------------------ */
-        /* 2. HADRON-PAIR VIEW   (zoom 250 → 70)                              */
-        /* ------------------------------------------------------------------ */
-        } else if (zoomFactor > ZOOM_HADRON ) {
-          const zoomRange  = ZOOM_PARTICLE - ZOOM_HADRON;
-          const progress01 = (zoomFactor - ZOOM_HADRON) / zoomRange; // 0-→1
+          emitOscillatingParticle(buffer3DDir, gluonCenterX, gluonCenterY, gluonCenterZ, nowSec, fieldRadius);
     
-          pairCenterX   = gluonCenterX + Math.round(orbitRadius * progress01);
+        } else if (zoomFactor > ZOOM_HADRON) {
+          const progress01 = (zoomFactor - ZOOM_HADRON) / (ZOOM_PARTICLE - ZOOM_HADRON);
+          pairCenterX = gluonCenterX + Math.round(orbitRadius * progress01);
     
-          const angle = timePhase * 2 * Math.PI;
-          const dx = Math.cos(angle) * orbitRadius;
-          const dy = Math.sin(angle) * orbitRadius;
+          const ang = nowSec * 2 * Math.PI;
+          const dx = Math.cos(ang) * orbitRadius;
+          const dy = Math.sin(ang) * orbitRadius;
     
-          emitOscillatingParticle(
-            buffer3DDir,
-            Math.round(pairCenterX + dx),
-            Math.round(gluonCenterY   + dy),
-            gluonCenterZ, timePhase, fieldRadius
-          );
+          emitOscillatingParticle(buffer3DDir, Math.round(pairCenterX + dx), Math.round(gluonCenterY + dy), gluonCenterZ, nowSec, fieldRadius);
+          emitOscillatingParticle(buffer3DDir, Math.round(pairCenterX - dx), Math.round(gluonCenterY - dy), gluonCenterZ, nowSec + PHASE_OFFSET, fieldRadius);
     
-          emitOscillatingParticle(
-            buffer3DDir,
-            Math.round(pairCenterX - dx),
-            Math.round(gluonCenterY   - dy),
-            gluonCenterZ, timePhase + 0.5, fieldRadius
-          );
-    
-        /* ------------------------------------------------------------------ */
-        /* 3. BARYON VIEW (zoom ≤ 70) — camera glued to hadron 0, with phase  */
-        /* ------------------------------------------------------------------ */
         } else {
-        
-          const hLock = 2;                                             // lock to hadron 2
-          const hAngle = particleAngle + hLock * (2 * Math.PI / 3) - Math.PI / 3;
-          const hXoff  = Math.cos(hAngle) * triangleRadius;
-          const hYoff  = Math.sin(hAngle) * triangleRadius;
-        
-          const t          = zoomFactor / 70;
-          const camCenterX = Math.round(gluonCenterX + hXoff * t);
-          const camCenterY = Math.round(gluonCenterY + hYoff * t);
-          const camCenterZ = gluonCenterZ;
-        
           particleAngle += 0.02;
           hadronAngle   += 0.05;
-        
+    
           for (let h = 0; h < 3; h++) {
-            const ang   = particleAngle + h * (2 * Math.PI / 3);
-            const triX  = Math.cos(ang) * triangleRadius;
-            const triY  = Math.sin(ang) * triangleRadius;
-        
-            const hadronCX = Math.round(camCenterX + triX);
-            const hadronCY = Math.round(camCenterY + triY);
-            const hadronCZ = camCenterZ;
-        
+            const phase = h * (2 * Math.PI / 3); // 0, 120°, 240°
+            const theta = particleAngle + phase;
+    
+            // Rotated orbit plane around arbitrary tilted vector
+            const ax = Math.cos(phase);
+            const ay = Math.sin(phase);
+            const az = 0.7; // slight Z lift to make it 3D
+            const len = Math.sqrt(ax * ax + ay * ay + az * az);
+            const ux = ax / len, uy = ay / len, uz = az / len;
+    
+            // Position in orbit around this axis
+            const cosT = Math.cos(theta), sinT = Math.sin(theta);
+            const oneMinusCos = 1 - cosT;
+    
+            // Rotation matrix around unit vector (Rodrigues' formula)
+            const x = triRadius * (
+              (cosT + ux * ux * oneMinusCos) * 1 +
+              (ux * uy * oneMinusCos - uz * sinT) * 0 +
+              (ux * uz * oneMinusCos + uy * sinT) * 0
+            );
+            const y = triRadius * (
+              (uy * ux * oneMinusCos + uz * sinT) * 1 +
+              (cosT + uy * uy * oneMinusCos) * 0 +
+              (uy * uz * oneMinusCos - ux * sinT) * 0
+            );
+            const z = triRadius * (
+              (uz * ux * oneMinusCos - uy * sinT) * 1 +
+              (uz * uy * oneMinusCos + ux * sinT) * 0 +
+              (cosT + uz * uz * oneMinusCos) * 0
+            );
+    
+            const hadronCX = Math.round(gluonCenterX + x);
+            const hadronCY = Math.round(gluonCenterY + y);
+            const hadronCZ = Math.round(gluonCenterZ + z);
+    
+            // Inner particle orbits – use consistent XY, YZ, XZ orbiting
             const a = hadronAngle;
             let x1, y1, z1, x2, y2, z2;
-        
-            if (h === 0) {           // XY
+    
+            if (h === 0) {
               x1 = hadronCX + Math.round(Math.cos(a) * orbitRadius);
               y1 = hadronCY + Math.round(Math.sin(a) * orbitRadius);
               z1 = hadronCZ;
-        
+    
               x2 = hadronCX - Math.round(Math.cos(a) * orbitRadius);
               y2 = hadronCY - Math.round(Math.sin(a) * orbitRadius);
               z2 = hadronCZ;
-        
-            } else if (h === 1) {    // YZ
+    
+            } else if (h === 1) {
               x1 = hadronCX;
               y1 = hadronCY + Math.round(Math.cos(a) * orbitRadius);
               z1 = hadronCZ + Math.round(Math.sin(a) * orbitRadius);
-        
+    
               x2 = hadronCX;
               y2 = hadronCY - Math.round(Math.cos(a) * orbitRadius);
               z2 = hadronCZ - Math.round(Math.sin(a) * orbitRadius);
-        
-            } else {                 // XZ  (h === 2)
+    
+            } else {
               x1 = hadronCX + Math.round(Math.cos(a) * orbitRadius);
               y1 = hadronCY;
               z1 = hadronCZ + Math.round(Math.sin(a) * orbitRadius);
-        
+    
               x2 = hadronCX - Math.round(Math.cos(a) * orbitRadius);
               y2 = hadronCY;
               z2 = hadronCZ - Math.round(Math.sin(a) * orbitRadius);
             }
+    
+            emitOscillatingParticle(buffer3DDir, x1, y1, z1, nowSec,       fieldRadius);
+            emitOscillatingParticle(buffer3DDir, x2, y2, z2, nowSec + PHASE_OFFSET, fieldRadius);
+          } 
+        }
+    
+        const scaleX = canvas.width  / size3DX;
+        const scaleY = canvas.height / size3DY;
+        renderGluonField(buffer3DDir, ctx, 0, 0, scaleX, scaleY, { mode: colorMode, resolution: resolution });
+
+        ctx.fillStyle = "red";
+        ctx.font = "16px sans-serif";
+        ctx.fillText("A: Entered force vector block", 20, 20);
         
-            emitOscillatingParticle(buffer3DDir, x1, y1, z1, timePhase,       fieldRadius);
-            emitOscillatingParticle(buffer3DDir, x2, y2, z2, timePhase + 0.5, fieldRadius);
+        ctx.fillText("C: higgsParticles.length = " + higgsParticles.length, 20, 260);
+
+        let forceVectorsVisible = true;
+        if (forceVectorsVisible) {
+          ctx.fillText("B: forceVectorsVisible = true", 20, 40);
+          ctx.fillText("C: higgsParticles.length = " + higgsParticles.length, 20, 60);
+        
+          if (!Array.isArray(higgsParticles)) {
+            ctx.fillStyle = "red";
+            ctx.fillText("FATAL: higgsParticles not an array", 20, 20);
+            return;
+          }
+        
+          const scaleX = canvas.width  / size3DX;
+          const scaleY = canvas.height / size3DY;
+          const VECTOR_SCALE = 0.001;  // Adjust for arrow length
+        
+          let i = 0;
+          for (const p of higgsParticles) {
+            try {
+              i++;
+              ctx.fillText("particle " + i, 20, 20 + i * 20);
+        
+              if (!p || typeof p.x !== "number") {
+                ctx.fillStyle = "red";
+                ctx.fillText("BAD PARTICLE at i=" + i, 20, 20 + i * 20);
+                continue;
+              }
+        
+              const { fx, fy, fz } = sampleNetForce3D(p.x, p.y, p.z);
+              const { x: sx, y: sy } = voxelToScreen(p.x, p.y, p.z);
+        
+              const ex = sx - fx * scaleX * VECTOR_SCALE;
+              const ey = sy - fy * scaleY * VECTOR_SCALE;
+        
+              //drawArrow(sx, sy, ex, ey, -fz);
+              drawForceArrow(ctx, sx, sy, -fx * scaleX * VECTOR_SCALE, -fy * scaleY * VECTOR_SCALE);
+              
+            } catch (err) {
+              ctx.fillStyle = "red";
+              ctx.fillText("ERROR at particle " + i + ": " + err.message, 20, 20 + i * 20);
+              return;
+            }
           }
         }
         
-        /* ------------------------------------------------------------------ */
-        /* Render buffer to canvas                                            */
-        /* ------------------------------------------------------------------ */
-        const scaleX = canvas.width  / size3DX;
-        const scaleY = canvas.height / size3DY;
-    
-        renderGluonField(buffer3DDir, ctx, 0, 0, scaleX, scaleY, { mode: colorMode, resolution: resolution });
-    
-        /* UI label update */
         const label = document.getElementById("label");
         if (label) {
-          label.innerText =
-            zoomFactor > 250 ? "Scene: Particle" :
-            zoomFactor >  70 ? "Scene: Hadron Pair" :
-                               "Scene: Baryon Trio";
+          label.innerText = zoomFactor > ZOOM_PARTICLE ? "Scene: Particle" :
+                zoomFactor >  ZOOM_HADRON  ? "Scene: Hadron Pair" : "Scene: Baryon Trio";
         }
+    
+        /* choose a readable font size: 2 % of canvas width,
+           but never smaller than 14 px                           */
+        const fontSize   = Math.max(14, canvas.width * 0.02);
+        const lineHeight = fontSize + 4;
+        ctx.font         = fontSize.toFixed(0) + "px sans-serif";
+            
+        ctx.fillStyle = "white";
         
-        if ( zoomFactor > ZOOM_PARTICLE ) {
-          
-          ctx.fillStyle = "white";
-          
-          ctx.fillText("centerX: " + centerX, 20, 100 );
-          ctx.fillText("centerY:" +  centerY, 20, 120 );
+        let y = lineHeight;
         
-          // Downward arrow from left, label "Particle"
+        ctx.fillText("Scene: Main",                     20, y);  y += lineHeight;
+        ctx.fillText("Zoom scale: " + zoomScale.toFixed(2) + "×", 20, y);  y += lineHeight;
+        ctx.fillText("Color Mode: " + colorMode,        20, y);  y += lineHeight;
+        ctx.fillText("Resolution: " + resolution,       20, y);  y += lineHeight;
+        ctx.fillText("centerX: " + centerX.toFixed(1),  20, y);  y += lineHeight;
+        ctx.fillText("centerY: " + centerY.toFixed(1),  20, y);
+    
+        if (zoomFactor > ZOOM_PARTICLE) {
           drawArrow(centerX - 80, centerY, centerX, centerY);
-          ctx.fillText("Particle", centerX - 110, centerY + 20);
-          ctx.fillText("Fluctuates at f", centerX - 110, centerY + 40);
           
-          // Dotted velocity arrow → right
+            // starting anchor under the horizontal arrow
+            let labelY = centerY + lineHeight;
+            const labelX = centerX - 110;
+            
+            ctx.fillText("Particle",        labelX, labelY); labelY += lineHeight;
+            ctx.fillText("Fluctuates at f", labelX, labelY);          
+ 
           ctx.setLineDash([5, 5]);
           drawArrow(centerX, centerY, centerX + 80, centerY);
           ctx.setLineDash([]);
           ctx.fillText("V", centerX + 85, centerY - 5);
-        
-          // Diagonal arrow up-right labeled "Propagates at C"
           drawArrow(centerX, centerY, centerX + 70, centerY - 70);
           ctx.fillText("Propagates at C", centerX + 75, centerY - 75);
-        
-          // Higgs field arrows
-          const hx = centerX + 100;
-          const hy = centerY + 100;
-          drawArrow(hx, hy, hx, hy - 60);         // upward
-          drawArrow(hx, hy, hx + 45, hy + 45);    // down-right
-          drawArrow(hx, hy, hx - 45, hy + 45);    // down-left
+          const hx = centerX + 100, hy = centerY + 100;
+          drawArrow(hx, hy, hx, hy - 60);
+          drawArrow(hx, hy, hx + 45, hy + 45);
+          drawArrow(hx, hy, hx - 45, hy + 45);
           ctx.fillText("Higgs field", hx + 50, hy - 10);
-          
-        } else if ( zoomFactor > ZOOM_HADRON ) {
-          drawArrow(pairCenterX * scaleX, centerY - 100, pairCenterX * scaleX, centerY);
-          ctx.fillStyle = "white";
-          ctx.fillText("Opposing field forces", pairCenterX * scaleX + 10, centerY - 70);
-          ctx.fillText("negate each other", pairCenterX * scaleX + 10, centerY - 50);
-          ctx.fillText("Unequal forces cause particles to move toward lesser force", centerX - 120, centerY + 100);
-          ctx.fillText("This causes particles to be pushed toward each other by the forces in the Higgs Field", centerX - 175, centerY + 130);
-          ctx.fillText("This produces a hadron of two particles opposed in phase in a stable 2 body orbit", centerX - 175, centerY + 160);
-            
-        }
     
-        ctx.fillStyle = "white";
-        ctx.fillText("Scene: Main",                 20, 20);
-        ctx.fillText("Zoom scale: " + zoomScale.toFixed(2) + "×", 20, 40);
-        ctx.fillText("Color Mode: " + colorMode,   20, 60);
-        ctx.fillText("Resolution: " + resolution,  20, 80);
+        } else if (zoomFactor > ZOOM_HADRON) {
+          drawArrow(pairCenterX * scaleX, centerY - 100, pairCenterX * scaleX, centerY);
+
+          ctx.fillText("Opposing field forces", pairCenterX * scaleX + 10, centerY - 70);
+          ctx.fillText("negate each other",     pairCenterX * scaleX + 10, centerY - 50);
+                              
+          let hyText = centerY + 100;
+          ctx.fillText("Unequal forces cause particles to move toward lesser force", centerX - 120, hyText); hyText += lineHeight;
+          ctx.fillText("This causes particles to be pushed toward each other by the forces in the Higgs Field", centerX - 175, hyText); 
+          hyText += lineHeight;
+          ctx.fillText("This produces a hadron of two particles opposed in phase in a stable 2 body orbit", centerX - 175, hyText);          
+                      
+        }
     
       } catch (e) {
         const log = document.getElementById("errorLog");
