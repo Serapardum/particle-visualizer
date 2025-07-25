@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Particle Field Visualizer</title>
+  <title>Particle Field Visualizer v0.1d</title>
   <style>
     html, body {
       margin: 0;
@@ -69,7 +69,7 @@
 </head>
 <body>
     <div id="ui-wrapper">
-      <h2>Particle Field Visualizer v0.1b</h2>
+      <h2>Particle Field Visualizer v0.1d</h2>
     
       <div id="label">Scene 0 Active</div>
     
@@ -82,6 +82,8 @@
     
     <!-- NEW: Left-aligned floating buttons -->
     <div id="left-controls">
+      <button id="phaseShiftBtn" onclick="togglePhaseShift()">180°</button>
+      <button id="timeFlowBtn" onclick="toggleTimeFlow()">T+</button>
       <button id="toggleColorModeBtn" onclick="toggleColorMode()">Toggle Color Mode</button>
       <button id="toggleResolutionBtn" onclick="toggleResolutionMode()">Toggle Resolution Mode</button>
       <input type="range" id="separationSlider" min="1" max="100" step="1" value="15">
@@ -110,7 +112,7 @@
     const DIR_POS_Y = 2;  // +Y → up     → green
     const DIR_NEG_Y = 3;  // -Y → down   → red
     const DIR_POS_Z = 4;  // +Z → forward → yellow
-    const DIR_NEG_Z = 5;  // -Z → back    → purplej
+    const DIR_NEG_Z = 5;  // -Z → back    → purplj
     
     const TIME_SCALE   = 0.5;               // full wave every 2 seconds
     const PHASE_OFFSET = 0.5 / TIME_SCALE;  // = 1.0 → 180° shift        
@@ -121,17 +123,34 @@
     
     let higgsParticles = [];
 
+    let timeFlowEnabled = true;
+    let phaseShiftEnabled = true;
+    let storedSec = 0;
+    
+    function togglePhaseShift() {
+      phaseShiftEnabled = !phaseShiftEnabled;
+      const btn = document.getElementById("phaseShiftBtn");
+      btn.innerText = phaseShiftEnabled ? "180°" : "0°";
+    }
+      
+    function toggleTimeFlow() {
+      timeFlowEnabled = !timeFlowEnabled;
+      const btn = document.getElementById("timeFlowBtn");
+      btn.innerText = timeFlowEnabled ? "T+" : "T";
+    }
+    
     let colorMode = "subtractive";
     function toggleColorMode() {
       colorMode = (colorMode === "subtractive") ? "additive" : "subtractive";
       updateColorModeLabel();
     }
+    
     function updateColorModeLabel() {
       const btn = document.getElementById("toggleColorModeBtn");
       if (btn) btn.innerText = "Color Mode: " + colorMode;
     }
         
-    let resolution = "medium";
+    let resolution = "high";
     function toggleResolutionMode() {
       if ( resolution === "low") {
         resolution = "medium"
@@ -178,7 +197,7 @@
       console.log(`Initialized 3D buffer: ${size3DX}×${size3DY}×${size3DZ} = ${totalVoxels} floats`);
     }
                  
-    function emitOscillatingParticle(buffer, cx, cy, cz, t, radius) {
+    function emitOscillatingParticle(buffer, centerX, centerY, centerZ, t, radius) {
       const osc       = Math.sin(t * TIME_SCALE * 2 * Math.PI);
       const radiusInt = Math.floor(radius);
       const dir       = (osc >= 0) ? DIR_POS_Y : DIR_NEG_Y;   // ← declare ONCE here
@@ -193,20 +212,22 @@
             const alpha   = falloff * falloff;
             const value   = 255 * alpha * osc;
     
-            const ix = cx + x;
-            const iy = cy + y;
-            const iz = cz + z;
+            const indexX = centerX + x;
+            const indexY = centerY + y;
+            const indexZ = centerZ + z;
     
-            if (ix<0||ix>=size3DX||iy<0||iy>=size3DY||iz<0||iz>=size3DZ) continue;
+            if (indexX < 0 || indexX >= size3DX || indexY < 0 || indexY >= size3DY || 
+                                    indexZ < 0 || indexZ >= size3DZ) 
+                    continue;
     
-            const idx = getFieldIndex(ix, iy, iz, dir);
-            buffer[idx] += Math.abs(value);
+            const index = getFieldIndex(indexX, indexY, indexZ, dir);
+            buffer[index] += Math.abs(value);
           }
         }
       }
     
       // register ONE logical particle
-      higgsParticles.push({ x: cx, y: cy, z: cz, dir });
+      higgsParticles.push({ x: centerX, y: centerY, z: centerZ, dir });
     }
 
     /* ====================================================================
@@ -217,9 +238,7 @@
       const W = ctx.canvas.width, H = ctx.canvas.height;
     
       /* persistent ImageData buffer */
-      if (!renderGluonField.img ||
-          renderGluonField.img.width  !== W ||
-          renderGluonField.img.height !== H)
+      if (!renderGluonField.img || renderGluonField.img.width  !== W || renderGluonField.img.height !== H)
       {
         renderGluonField.img = ctx.getImageData(0,0,W,H);
       }
@@ -246,8 +265,8 @@
       }
     
       /* ---- main XY scan ----------------------------------------------- */
-      for (let vy = 0; vy < size3DY; ++vy) {
-        for (let vx = 0; vx < size3DX; ++vx) {
+      for (let vy = 0; vy < size3DY - 1; ++vy) {
+        for (let vx = 0; vx < size3DX - 1; ++vx) {
     
           let bestZ = 0, bestR = 0, bestG = 0, bestScore = -1;
     
@@ -295,8 +314,13 @@
           let dispR = bestR, dispG = bestG;
           if (mode === "subtractive") {
             const d = Math.abs(bestR - bestG);
-            if (bestR >= bestG) { dispR = d; dispG = 0; }
-            else                { dispR = 0; dispG = d; }
+            if (bestR >= bestG) { 
+              dispR = d; 
+              dispG = 0; 
+            } else { 
+              dispR = 0; 
+              dispG = d; 
+            }
           }
     
           const px0 = Math.floor(offX + vx * sX);
@@ -346,40 +370,82 @@
       return ((y * size3DZ + z) * size3DX + x) * 6 + dir;
     } 
     
-    /* ────────────────────────────────────────────────────────────────
-       Net inward-push force at a voxel surrounded by an outward field
-       Returns a gluon-space vector { fx, fy, fz }
-       ---------------------------------------------------------------- */
-    function sampleNetForce3D(cx, cy, cz, R = 20) {
-      let fx = 0, fy = 0, fz = 0;
+    const forceHistory = [];
+    const historyLength = 4; // Number of frames to average over
     
-      for (let dz = -R; dz <= R; dz++) {
-        const z = cz + dz;
-        if (z < 0 || z >= size3DZ) continue;
+    function fieldStrength(x, y, z) {
+      const posX = buffer3DDir[getFieldIndex(x, y, z, DIR_POS_X)];
+      const negX = buffer3DDir[getFieldIndex(x, y, z, DIR_NEG_X)];
+      const posY = buffer3DDir[getFieldIndex(x, y, z, DIR_POS_Y)];
+      const negY = buffer3DDir[getFieldIndex(x, y, z, DIR_NEG_Y)];
+      const posZ = buffer3DDir[getFieldIndex(x, y, z, DIR_POS_Z)];
+      const negZ = buffer3DDir[getFieldIndex(x, y, z, DIR_NEG_Z)];
     
-        for (let dy = -R; dy <= R; dy++) {
-          const y = cy + dy;
-          if (y < 0 || y >= size3DY) continue;
+      // “pressure” = total imbalance, colour-agnostic
+      return Math.abs(posX - negX) + Math.abs(posY - negY) + Math.abs(posZ - negZ);
+    }
     
-          for (let dx = -R; dx <= R; dx++) {
-            const x = cx + dx;
-            if (x < 0 || x >= size3DX) continue;
-            if (dx === 0 && dy === 0 && dz === 0) continue;      // skip center
+    function sampleNetForce3D(centerX, centerY, centerZ, index, radius = 20) {
+      let totalForceX = 0;
+      let totalForceY = 0;
+      let totalForceZ = 0;
     
-            // use one channel (e.g. DIR_POS_Y) as magnitude proxy
-            const val = buffer3DDir[getFieldIndex(x, y, z, DIR_POS_Y)];
-            if (val < 1) continue;
+      for (let offsetZ = -radius; offsetZ <= radius; offsetZ++) {
+        const fieldZ = centerZ + offsetZ;
+        if (fieldZ < 0 || fieldZ >= size3DZ) continue;
     
-            const dist = Math.hypot(dx, dy, dz);
-            const scale = -(val / dist);    // negative → toward center
-            fx += dx * scale;
-            fy += dy * scale;
-            fz += dz * scale;
+        for (let offsetY = -radius; offsetY <= radius; offsetY++) {
+          const fieldY = centerY + offsetY;
+          if (fieldY < 0 || fieldY >= size3DY) continue;
+    
+          for (let offsetX = -radius; offsetX <= radius; offsetX++) {
+            const fieldX = centerX + offsetX;
+            if (fieldX < 0 || fieldX >= size3DX) continue;
+            if (offsetX === 0 && offsetY === 0 && offsetZ === 0) continue;
+    
+            const distanceSquared = offsetX * offsetX + offsetY * offsetY + offsetZ * offsetZ;
+            if (distanceSquared < 1e-6) continue;
+    
+            // Signed directional imbalance (no Math.abs)
+            const fieldPosX = buffer3DDir[getFieldIndex(fieldX, fieldY, fieldZ, DIR_POS_X)];
+            const fieldNegX = buffer3DDir[getFieldIndex(fieldX, fieldY, fieldZ, DIR_NEG_X)];
+            const fieldPosY = buffer3DDir[getFieldIndex(fieldX, fieldY, fieldZ, DIR_POS_Y)];
+            const fieldNegY = buffer3DDir[getFieldIndex(fieldX, fieldY, fieldZ, DIR_NEG_Y)];
+            const fieldPosZ = buffer3DDir[getFieldIndex(fieldX, fieldY, fieldZ, DIR_POS_Z)];
+            const fieldNegZ = buffer3DDir[getFieldIndex(fieldX, fieldY, fieldZ, DIR_NEG_Z)];
+    
+            const deltaX = Math.abs(fieldPosX - fieldNegX);
+            const deltaY = Math.abs(fieldPosY - fieldNegY);
+            const deltaZ = Math.abs(fieldPosZ - fieldNegZ);
+            
+            // Combined scalar magnitude
+            const force = deltaX + deltaY + deltaZ;
+            
+            totalForceX += offsetX * force / distanceSquared;
+            totalForceY += offsetY * force / distanceSquared;
+            totalForceZ += offsetZ * force / distanceSquared;
           }
         }
       }
-      return { fx, fy, fz };
-    }    
+    
+      // Temporal smoothing (unchanged)
+      if (!forceHistory[index]) forceHistory[index] = [];
+      const history = forceHistory[index];
+      history.push({ x: totalForceX, y: totalForceY, z: totalForceZ });
+      if (history.length > historyLength) history.shift();
+    
+      let sumX = 0, sumY = 0, sumZ = 0;
+      for (const h of history) {
+        sumX += h.x; sumY += h.y; sumZ += h.z;
+      }
+      const len = history.length || 1;
+    
+      return {
+        forceX: sumX / len,
+        forceY: sumY / len,
+        forceZ: sumZ / len
+      };
+    }
     
     function resizeCanvas() {
       canvas.width = window.innerWidth;
@@ -469,7 +535,7 @@
       ctx.restore();
     }
     
-     /* ────────────────────────────────────────────────────────────────
+    /* ────────────────────────────────────────────────────────────────
        Convert voxel coordinates (voxelX, voxelY, voxelZ) to
        screen-space pixel coordinates { x, y }.
     
@@ -501,23 +567,33 @@
       return { x: screenX, y: screenY };
     }
     
+    let nowSec = performance.now() / 1000;
+        
     function sceneMain() {
       try {
         bufferInit();
         higgsParticles.length = 0;
     
-        const nowSec        = performance.now() * 0.001;
-        const zoomScale     = zoomFactor / 100;
+        if ( timeFlowEnabled )
+          nowSec            = performance.now() / 1000;
+          
+        const zoomScale      =  zoomFactor / 100;
         const gluonCenterX  = Math.floor(size3DX / 2);
         const gluonCenterY  = Math.floor(size3DY / 2);
         const gluonCenterZ  = Math.floor(size3DZ / 2);
         const fieldRadius   = 10 * zoomScale;
-        const orbitRadius   = Math.round(5  * zoomScale);
+            
+        const separationSlider = document.getElementById("separationSlider");
+        const separationValue = Number(separationSlider.value);
+        const orbitRadius = Math.round(separationValue * zoomScale); 
+               
         const triRadius     = Math.round(40 * zoomScale);
         const ZOOM_PARTICLE = 175;
         const ZOOM_HADRON   = 70;
     
         let pairCenterX = 0;
+    
+        const timeShift = phaseShiftEnabled ? PHASE_OFFSET : 0;
     
         if (zoomFactor > ZOOM_PARTICLE) {
           emitOscillatingParticle(buffer3DDir, gluonCenterX, gluonCenterY, gluonCenterZ, nowSec, fieldRadius);
@@ -525,17 +601,21 @@
         } else if (zoomFactor > ZOOM_HADRON) {
           const progress01 = (zoomFactor - ZOOM_HADRON) / (ZOOM_PARTICLE - ZOOM_HADRON);
           pairCenterX = gluonCenterX + Math.round(orbitRadius * progress01);
-    
+            
           const ang = nowSec * 2 * Math.PI;
+          
           const dx = Math.cos(ang) * orbitRadius;
           const dy = Math.sin(ang) * orbitRadius;
     
           emitOscillatingParticle(buffer3DDir, Math.round(pairCenterX + dx), Math.round(gluonCenterY + dy), gluonCenterZ, nowSec, fieldRadius);
-          emitOscillatingParticle(buffer3DDir, Math.round(pairCenterX - dx), Math.round(gluonCenterY - dy), gluonCenterZ, nowSec + PHASE_OFFSET, fieldRadius);
+          emitOscillatingParticle(buffer3DDir, Math.round(pairCenterX - dx), Math.round(gluonCenterY - dy), gluonCenterZ, nowSec + timeShift, fieldRadius);
     
         } else {
-          particleAngle += 0.02;
-          hadronAngle   += 0.05;
+        
+          if ( timeFlowEnabled ) {
+            particleAngle += 0.02;
+            hadronAngle   += 0.05;
+          };
     
           for (let h = 0; h < 3; h++) {
             const phase = h * (2 * Math.PI / 3); // 0, 120°, 240°
@@ -572,7 +652,7 @@
             const hadronCX = Math.round(gluonCenterX + x);
             const hadronCY = Math.round(gluonCenterY + y);
             const hadronCZ = Math.round(gluonCenterZ + z);
-    
+            
             // Inner particle orbits – use consistent XY, YZ, XZ orbiting
             const a = hadronAngle;
             let x1, y1, z1, x2, y2, z2;
@@ -606,63 +686,13 @@
             }
     
             emitOscillatingParticle(buffer3DDir, x1, y1, z1, nowSec,       fieldRadius);
-            emitOscillatingParticle(buffer3DDir, x2, y2, z2, nowSec + PHASE_OFFSET, fieldRadius);
+            emitOscillatingParticle(buffer3DDir, x2, y2, z2, nowSec + timeShift, fieldRadius);
           } 
         }
     
         const scaleX = canvas.width  / size3DX;
         const scaleY = canvas.height / size3DY;
         renderGluonField(buffer3DDir, ctx, 0, 0, scaleX, scaleY, { mode: colorMode, resolution: resolution });
-
-        ctx.fillStyle = "red";
-        ctx.font = "16px sans-serif";
-        ctx.fillText("A: Entered force vector block", 20, 20);
-        
-        ctx.fillText("C: higgsParticles.length = " + higgsParticles.length, 20, 260);
-
-        let forceVectorsVisible = true;
-        if (forceVectorsVisible) {
-          ctx.fillText("B: forceVectorsVisible = true", 20, 40);
-          ctx.fillText("C: higgsParticles.length = " + higgsParticles.length, 20, 60);
-        
-          if (!Array.isArray(higgsParticles)) {
-            ctx.fillStyle = "red";
-            ctx.fillText("FATAL: higgsParticles not an array", 20, 20);
-            return;
-          }
-        
-          const scaleX = canvas.width  / size3DX;
-          const scaleY = canvas.height / size3DY;
-          const VECTOR_SCALE = 0.001;  // Adjust for arrow length
-        
-          let i = 0;
-          for (const p of higgsParticles) {
-            try {
-              i++;
-              ctx.fillText("particle " + i, 20, 20 + i * 20);
-        
-              if (!p || typeof p.x !== "number") {
-                ctx.fillStyle = "red";
-                ctx.fillText("BAD PARTICLE at i=" + i, 20, 20 + i * 20);
-                continue;
-              }
-        
-              const { fx, fy, fz } = sampleNetForce3D(p.x, p.y, p.z);
-              const { x: sx, y: sy } = voxelToScreen(p.x, p.y, p.z);
-        
-              const ex = sx - fx * scaleX * VECTOR_SCALE;
-              const ey = sy - fy * scaleY * VECTOR_SCALE;
-        
-              //drawArrow(sx, sy, ex, ey, -fz);
-              drawForceArrow(ctx, sx, sy, -fx * scaleX * VECTOR_SCALE, -fy * scaleY * VECTOR_SCALE);
-              
-            } catch (err) {
-              ctx.fillStyle = "red";
-              ctx.fillText("ERROR at particle " + i + ": " + err.message, 20, 20 + i * 20);
-              return;
-            }
-          }
-        }
         
         const label = document.getElementById("label");
         if (label) {
@@ -685,8 +715,77 @@
         ctx.fillText("Color Mode: " + colorMode,        20, y);  y += lineHeight;
         ctx.fillText("Resolution: " + resolution,       20, y);  y += lineHeight;
         ctx.fillText("centerX: " + centerX.toFixed(1),  20, y);  y += lineHeight;
-        ctx.fillText("centerY: " + centerY.toFixed(1),  20, y);
-    
+        ctx.fillText("centerY: " + centerY.toFixed(1),  20, y); y += lineHeight;
+
+        let forceVectorsVisible = true;
+        if (forceVectorsVisible) {
+        
+          if (!Array.isArray(higgsParticles)) {
+            ctx.fillStyle = "red";
+            ctx.fillText("FATAL: higgsParticles not an array", 20, 20);
+            return;
+          }
+        
+          const scaleX = canvas.width  / size3DX;
+          const scaleY = canvas.height / size3DY;
+          const VECTOR_SCALE = 0.001;  // Adjust for arrow length
+        
+          let i = 0;
+          for (const p of higgsParticles) {
+            try {
+              i++;
+        
+              if (!p || typeof p.x !== "number") {
+                ctx.fillStyle = "red";
+                ctx.fillText("BAD PARTICLE at i=" + i, 20, 20 + i * 20);
+                continue;
+              }
+        
+              const { forceX, forceY, forceZ } = sampleNetForce3D(p.x, p.y, p.z, i);
+              const { x: sx, y: sy } = voxelToScreen(p.x, p.y, p.z);
+              const arrow_scale = 0.25; // 1/4 length
+              drawArrow(sx, sy, sx + forceX * arrow_scale, sy + forceY * arrow_scale, -forceZ * arrow_scale );
+
+                if (typeof sceneMain.forceCycle === "undefined") {
+                  sceneMain.forceCycle = [];
+                }
+                
+                if (typeof sceneMain.forceCycle[i] === "undefined") {
+                  sceneMain.forceCycle[i] = {
+                    prev: 0,
+                    curr: 0,
+                    apex: 0
+                  };
+                }
+                
+                const totalForce = Math.abs(forceX) + Math.abs(forceY) + Math.abs(forceZ);
+                const fc = sceneMain.forceCycle[i];
+                
+                // Detect local maximum (apex)
+                if (fc.prev < fc.curr && fc.curr > totalForce) {
+                  fc.apex = fc.curr;
+                }
+                
+                // Shift values for next frame
+                fc.prev = fc.curr;
+                fc.curr = totalForce;
+                
+                // Optional: display
+                ctx.fillText("Force of particle " + i + ": " + totalForce, 20, y); y += lineHeight;
+                ctx.fillText("Apex: " + fc.apex, 20, y); y += lineHeight;
+                
+                //              const ex = sx + fx * scaleX * VECTOR_SCALE;
+//              const ey = sy + fy * scaleY * VECTOR_SCALE;
+//             drawForceArrow(ctx, sx, sy, fx * scaleX * VECTOR_SCALE, fy * scaleY * VECTOR_SCALE );
+              
+            } catch (err) {
+              ctx.fillStyle = "red";
+              ctx.fillText("ERROR at particle " + i + ": " + err.message, 20, 220);
+              return;
+            }
+          }
+        }
+                    
         if (zoomFactor > ZOOM_PARTICLE) {
           drawArrow(centerX - 80, centerY, centerX, centerY);
           
@@ -772,4 +871,3 @@
   </script>
 </body>
 </html>
-    
